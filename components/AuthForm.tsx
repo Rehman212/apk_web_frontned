@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { apiBase } from "@/lib/apiBase";
 
 type FieldErrors = Record<string, string>;
 
@@ -35,8 +36,7 @@ export function AuthForm() {
     setErrors({});
     setBusy(true);
     try {
-      const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-      const res = await fetch(`${api}/api/auth/login`, {
+      const res = await fetch(`${apiBase()}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim(), password }),

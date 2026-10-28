@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { apiBase } from "@/lib/apiBase";
 import { HOME_SECTIONS, sectionName } from "@/lib/homeSections";
 
 type SectionCount = { slug: string; name: string; count: number };
@@ -18,8 +19,7 @@ export function CategoriesPanel({ onBack }: { onBack: () => void }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-      const res = await fetch(`${api}/api/apps/sections`, {
+      const res = await fetch(`${apiBase()}/api/apps/sections`, {
         headers: { Authorization: `Bearer ${token()}` },
         cache: "no-store",
       });
@@ -43,8 +43,7 @@ export function CategoriesPanel({ onBack }: { onBack: () => void }) {
     setBusy(true);
     setMsg("");
     try {
-      const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-      const res = await fetch(`${api}/api/apps/assign-random`, {
+      const res = await fetch(`${apiBase()}/api/apps/assign-random`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token()}` },
       });

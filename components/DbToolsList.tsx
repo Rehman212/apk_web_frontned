@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { apiBase } from "@/lib/apiBase";
 import { HOME_SECTIONS, sectionName } from "@/lib/homeSections";
 
 type DbApk = {
@@ -94,8 +95,7 @@ export function DbToolsList({
     if (!editing?.id) return;
     setSaving(true);
     try {
-      const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-      const res = await fetch(`${api}/api/apps/${editing.id}`, {
+      const res = await fetch(`${apiBase()}/api/apps/${editing.id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",

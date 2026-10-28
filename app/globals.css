@@ -22,3 +22,10 @@ body {
   background-size: cover;
   background-position: center;
 }
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

@@ -1,3 +1,4 @@
+import { hdMediaUrl } from "@/lib/media";
 import type { StoreApp } from "@/lib/catalog";
 
 export function AppIcon({
@@ -7,15 +8,21 @@ export function AppIcon({
   app: Pick<StoreApp, "slug" | "name" | "letter" | "iconUrl">;
   size?: number;
 }) {
-  const src = app.iconUrl || `/api/icon/${app.slug}`;
+  const raw = app.iconUrl || `/api/icon/${app.slug}`;
+  const src = hdMediaUrl(raw, Math.max(256, size * 3)) || raw;
+  const src2x = hdMediaUrl(raw, Math.max(512, size * 4)) || src;
+
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={src}
+      srcSet={`${src} 1x, ${src2x} 2x`}
       alt={`${app.name} icon`}
       width={size}
       height={size}
+      decoding="async"
       className="shrink-0 rounded-[22%] bg-zinc-100 object-cover shadow-sm"
+      style={{ width: size, height: size }}
     />
   );
 }

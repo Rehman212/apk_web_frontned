@@ -90,6 +90,88 @@ export function screenshotSvg(
 </svg>`;
 }
 
+export function heroBannerSvg(app: Pick<StoreApp, "slug" | "name" | "letter" | "kind" | "iconUrl">) {
+  const [a, b] = paletteFor(app.slug);
+  const letter = escapeXml((app.letter || app.name[0] || "A").slice(0, 1));
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="360" viewBox="0 0 420 360">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#141b33"/>
+      <stop offset=".5" stop-color="#3a2458"/>
+      <stop offset="1" stop-color="#f4b86a"/>
+    </linearGradient>
+    <linearGradient id="skin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6c8a4"/>
+      <stop offset="1" stop-color="#d9996c"/>
+    </linearGradient>
+    <linearGradient id="shirt" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${a}"/>
+      <stop offset="1" stop-color="${b}"/>
+    </linearGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f5f7fb" stop-opacity="1"/>
+      <stop offset=".28" stop-color="#f5f7fb" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="420" height="360" fill="url(#sky)"/>
+  <circle cx="48" cy="42" r="2" fill="#fff" opacity=".7"/>
+  <circle cx="90" cy="28" r="1.6" fill="#fff" opacity=".5"/>
+  <circle cx="130" cy="54" r="2" fill="#fff" opacity=".6"/>
+  <rect x="8" y="210" width="28" height="90" fill="#101827"/>
+  <rect x="42" y="188" width="22" height="112" fill="#1b2a40"/>
+  <rect x="70" y="200" width="34" height="100" fill="#152033"/>
+  <rect x="110" y="176" width="24" height="124" fill="#1a2740"/>
+  <ellipse cx="36" cy="248" rx="16" ry="70" fill="#0b1220"/>
+  <ellipse cx="36" cy="176" rx="22" ry="12" fill="#111827"/>
+  <g transform="translate(118,8)">
+    <ellipse cx="128" cy="328" rx="86" ry="14" fill="#000" opacity=".16"/>
+    <path d="M70 168c28-54 108-58 138-8l22 88c10 40-6 78-48 90l-96 10c-40-16-46-72-16-180z" fill="url(#shirt)"/>
+    <path d="M72 118c12-42 86-52 108-4 8 18 2 42-18 52-30 14-80 6-90-16z" fill="url(#skin)"/>
+    <path d="M68 102c22-48 118-50 128 10 2 18-10 30-28 34l-92 4c-14-6-16-24-8-48z" fill="#111827"/>
+    <path d="M64 108c30-16 102-20 122 8 6 8 0 14-10 12-36-8-88-6-112 4-8 2-10-8 0-24z" fill="#ef4444"/>
+    <circle cx="186" cy="108" r="9" fill="#f8fafc"/>
+    <path d="M154 128c16 10 30 10 46 0" stroke="#7c4a2d" stroke-width="3" fill="none"/>
+    <path d="M196 186c48 20 74 74 52 120l-48 8c-6-40-26-72-64-86z" fill="url(#shirt)"/>
+    <path d="M228 292c18 8 20 28 6 40-28 16-60 6-68-16 16-16 40-28 62-24z" fill="#111827"/>
+    <path d="M78 308c-8 20 8 38 32 36 22-2 32-20 24-36-16-4-40-4-56 0z" fill="#111827"/>
+    <rect x="108" y="214" width="52" height="52" rx="14" fill="#fff"/>
+    <text x="134" y="250" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-size="24" fill="${b}">${letter}</text>
+  </g>
+  <rect width="90" height="360" fill="url(#fade)"/>
+</svg>`;
+}
+
+export function promoShotSvg(
+  app: Pick<StoreApp, "slug" | "name" | "letter" | "kind" | "iconUrl">,
+  frame: number,
+) {
+  const [a, b] = paletteFor(app.slug + String(frame));
+  const [c, d] = paletteFor(app.slug + "alt" + String(frame));
+  const icon = app.iconUrl ? escapeXml(app.iconUrl) : "";
+  const mark = icon
+    ? `<image href="${icon}" x="248" y="78" width="144" height="144" preserveAspectRatio="xMidYMid meet"/>`
+    : `<circle cx="320" cy="150" r="58" fill="#fff" opacity=".2"/>`;
+  const scenes = [
+    `<rect width="640" height="360" fill="${b}"/>
+     <circle cx="520" cy="40" r="150" fill="${a}" opacity=".45"/>
+     <circle cx="60" cy="320" r="160" fill="${c}" opacity=".4"/>`,
+    `<rect width="640" height="360" fill="${d}"/>
+     <path d="M0 220 Q200 90 360 200 T640 150 V360 H0z" fill="${a}" opacity=".7"/>
+     <circle cx="96" cy="70" r="46" fill="#fde68a"/>`,
+    `<rect width="640" height="360" fill="${a}"/>
+     <rect x="40" y="40" width="180" height="280" rx="28" fill="#000" opacity=".12"/>
+     <rect x="420" y="50" width="180" height="260" rx="28" fill="#000" opacity=".12"/>`,
+    `<rect width="640" height="360" fill="${c}"/>
+     <circle cx="320" cy="180" r="150" fill="${b}" opacity=".28"/>`,
+  ];
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+  ${scenes[frame % scenes.length]}
+  ${mark}
+</svg>`;
+}
+
 function escapeXml(value: string) {
   return value
     .replaceAll("&", "&amp;")

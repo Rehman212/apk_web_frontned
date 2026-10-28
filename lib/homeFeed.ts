@@ -1,10 +1,7 @@
+import { apiBase } from "@/lib/apiBase";
 import { allApps, type StoreApp } from "@/lib/catalog";
 import { dbApkToStoreApp, type DbApkRow } from "@/lib/dbApk";
 import { HOME_SECTIONS } from "@/lib/homeSections";
-
-function apiBase() {
-  return process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-}
 
 export async function loadHomeFeed() {
   const catalog = allApps();

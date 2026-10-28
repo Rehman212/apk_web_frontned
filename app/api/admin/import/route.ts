@@ -1,11 +1,8 @@
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
+import { apiBase } from "@/lib/apiBase";
 import type { StoreApp } from "@/lib/catalog";
 import { readImportedApps, upsertImportedApp } from "@/lib/importedApps";
-
-function apiBase() {
-  return process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-}
 
 async function requireAdmin(req: Request) {
   const header = req.headers.get("authorization") || "";

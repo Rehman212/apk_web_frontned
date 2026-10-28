@@ -1,5 +1,6 @@
 import rawApps from "@/data/fdroid-apps.json";
 import importedApps from "@/data/imported-apps.json";
+import { hdApp } from "@/lib/media";
 
 export type AppKind = "app" | "game";
 
@@ -81,10 +82,15 @@ export const categories: Category[] = [
 const fdroidApps = rawApps as StoreApp[];
 const csvApps = importedApps as StoreApp[];
 
+function withHdMedia(app: StoreApp): StoreApp {
+  const media = hdApp(app);
+  return { ...app, iconUrl: media.iconUrl, screenshots: media.screenshots };
+}
+
 function mergeCatalog(extra: StoreApp[] = csvApps) {
   const map = new Map<string, StoreApp>();
-  for (const app of fdroidApps) map.set(app.slug, app);
-  for (const app of extra) map.set(app.slug, app);
+  for (const app of fdroidApps) map.set(app.slug, withHdMedia(app));
+  for (const app of extra) map.set(app.slug, withHdMedia(app));
   return Array.from(map.values());
 }
 

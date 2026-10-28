@@ -1,4 +1,5 @@
 import type { AppKind, StoreApp } from "@/lib/catalog";
+import { hdMediaUrl } from "@/lib/media";
 
 export type CsvApkDraft = {
   row: number;
@@ -193,7 +194,7 @@ export function draftToStoreApp(draft: CsvApkDraft): StoreApp {
     packageName: draft.packageName,
     kind: draft.kind,
     category: draft.category || "tools",
-    iconUrl: draft.iconUrl || undefined,
+    iconUrl: hdMediaUrl(draft.iconUrl, 512) || draft.iconUrl || undefined,
     apkUrl: draft.apkUrl || undefined,
     rating: 0,
     ratingsCount: "0",

@@ -1,4 +1,5 @@
 import type { StoreApp } from "@/lib/catalog";
+import { hdApp } from "@/lib/media";
 
 export type DbApkRow = {
   id?: string;
@@ -23,14 +24,20 @@ export type DbApkRow = {
 
 export function dbApkToStoreApp(row: DbApkRow): StoreApp {
   if (row.payload && typeof row.payload === "object" && row.payload.slug) {
+    const payload = row.payload as StoreApp;
+    const media = hdApp({
+      iconUrl: row.iconUrl || payload.iconUrl,
+      screenshots: payload.screenshots,
+    });
     return {
-      ...(row.payload as StoreApp),
+      ...payload,
       slug: row.slug,
       name: row.name,
       packageName: row.packageName,
-      category: row.homeSection || row.category || (row.payload as StoreApp).category,
-      apkUrl: row.apkUrl || (row.payload as StoreApp).apkUrl,
-      iconUrl: row.iconUrl || (row.payload as StoreApp).iconUrl,
+      category: row.homeSection || row.category || payload.category,
+      apkUrl: row.apkUrl || payload.apkUrl,
+      iconUrl: media.iconUrl,
+      screenshots: media.screenshots,
     };
   }
 
@@ -43,7 +50,7 @@ export function dbApkToStoreApp(row: DbApkRow): StoreApp {
     packageName: row.packageName,
     kind: row.kind === "game" ? "game" : "app",
     category: row.homeSection || row.category || "tools",
-    iconUrl: row.iconUrl || undefined,
+    iconUrl: hdApp({ iconUrl: row.iconUrl || undefined }).iconUrl,
     apkUrl: row.apkUrl || undefined,
     rating: 0,
     ratingsCount: "0",

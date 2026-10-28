@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { ApkScraperTool } from "@/components/ApkScraperTool";
 import { CategoriesPanel } from "@/components/CategoriesPanel";
 import { CsvImportTool } from "@/components/CsvImportTool";
 import { DbToolsList } from "@/components/DbToolsList";
+import { apiBase } from "@/lib/apiBase";
 
 export type CatalogSnapshot = {
   catalog: number;
@@ -81,7 +83,7 @@ export function AdminDashboard({ catalog }: { catalog: CatalogSnapshot }) {
     section === "tools-categories";
 
   useEffect(() => {
-    const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+    const api = apiBase();
     const t = token();
     if (!t) {
       router.replace("/login");
@@ -488,42 +490,7 @@ export function AdminDashboard({ catalog }: { catalog: CatalogSnapshot }) {
             {section === "tools-csv" ? <CsvImportTool onBack={() => setSection("tools-all")} /> : null}
 
             {section === "tools-scraper" ? (
-              <>
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <h1 className="text-[15px] font-semibold text-white">Get APK Scraper</h1>
-                    <p className="text-[12px] text-slate-500">Ready for next setup step</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setSection("tools-all")}
-                    className="rounded-md border border-white/[0.08] px-2.5 py-1.5 text-[12px] text-slate-300 hover:bg-white/[0.04]"
-                  >
-                    ← ALL Tools
-                  </button>
-                </div>
-                <section className="rounded-lg border border-white/[0.06] bg-[#121820] p-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-[13px] font-medium text-white">APK Scraper</h2>
-                    <Chip tone="amber">Waiting setup</Chip>
-                  </div>
-                  <p className="mt-2 max-w-xl text-[12px] leading-5 text-slate-500">
-                    Menu is live. Next step (source / fields / flow) batane pe yahan wire kar denge.
-                  </p>
-                  <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                    {[
-                      ["Status", "Ready for config"],
-                      ["Source", "Not set"],
-                      ["Output", "Catalog queue"],
-                    ].map(([label, value]) => (
-                      <div key={label} className="rounded-md border border-white/[0.05] bg-[#0b0f14] px-3 py-2">
-                        <p className="text-[10px] text-slate-500">{label}</p>
-                        <p className="mt-0.5 text-[12px] text-slate-300">{value}</p>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              </>
+              <ApkScraperTool onBack={() => setSection("tools-all")} />
             ) : null}
           </div>
         </div>
