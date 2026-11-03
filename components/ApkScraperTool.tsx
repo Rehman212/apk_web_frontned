@@ -21,12 +21,14 @@ type JobStatus = {
   cancel: boolean;
   skipped: number;
   success: number;
+  limit?: number | null;
   errors: { url: string; error: string }[];
   message?: string;
 };
 
 export function ApkScraperTool({ onBack }: { onBack: () => void }) {
   const [url, setUrl] = useState("https://androidapks.com/");
+  const [limit, setLimit] = useState("100");
   const [jobId, setJobId] = useState("");
   const [status, setStatus] = useState("AndroidAPKs ke app sitemaps se overall details scrape karein.");
   const [job, setJob] = useState<JobStatus | null>(null);
@@ -46,21 +48,32 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
   }, []);
 
   async function api(path: string, init?: RequestInit) {
-    const res = await fetch(`${apiBase()}${path}`, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token()}`,
-        ...(init?.headers || {}),
-      },
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${apiBase()}${path}`, {
+        ...init,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token()}`,
+          ...(init?.headers || {}),
+        },
+      });
+    } catch {
+      throw new Error(`Cannot reach API at ${apiBase()}. Start Nest backend: npm run start:dev`);
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(
-        Array.isArray((data as { message?: string }).message)
-          ? (data as { message: string[] }).message[0]
-          : (data as { message?: string }).message || "Request failed",
-      );
+      const msg = Array.isArray((data as { message?: string }).message)
+        ? (data as { message: string[] }).message[0]
+        : (data as { message?: string }).message;
+      if (res.status === 401) throw new Error("Session expired. Sign in again.");
+      if (res.status === 404) {
+        throw new Error(
+          msg ||
+            `Scrape API missing on ${apiBase()}. Restart Nest backend so /api/scrape routes load.`,
+        );
+      }
+      throw new Error(msg || `Request failed (${res.status})`);
     }
     return data;
   }
@@ -71,8 +84,9 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
       setJob(data);
       const active = data.status === "discovering" || data.status === "running";
       setBusy(active);
+      const limitNote = data.limit ? ` · limit ${data.limit}` : "";
       setStatus(
-        `${data.status.replaceAll("_", " ")} · ${data.total} app links found · ${data.processed} processed · ${data.success} apps scraped · ${data.skipped || 0} other pages skipped · ${data.errors.length} errors`,
+        `${data.status.replaceAll("_", " ")}${limitNote} · ${data.total} queued · ${data.processed} processed · ${data.success} apps scraped · ${data.skipped || 0} skipped · ${data.errors.length} errors`,
       );
       if (active) {
         timer.current = window.setTimeout(() => void poll(id), 2000);
@@ -87,9 +101,17 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
     if (timer.current) window.clearTimeout(timer.current);
     setBusy(true);
     try {
+      const trimmed = limit.trim();
+      const parsed = trimmed === "" ? undefined : Number(trimmed);
+      if (parsed !== undefined && (!Number.isFinite(parsed) || parsed < 1)) {
+        throw new Error("Limit 1 ya us se zyada number likho, ya blank chhor do for all.");
+      }
       const data = (await api("/api/scrape/apk/start", {
         method: "POST",
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify({
+          url: url.trim(),
+          limit: parsed,
+        }),
       })) as { id: string };
       setJobId(data.id);
       window.localStorage.setItem("androidapks-job-id", data.id);
@@ -166,6 +188,41 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
           className="mt-2 w-full rounded-lg border border-amber-400/80 bg-white px-3.5 py-3 text-[14px] outline-none ring-0 focus:border-[#2f7bff]"
           placeholder="https://androidapks.com/"
         />
+        <label htmlFor="apk-limit" className="mt-4 block text-[13px] font-medium text-slate-700">
+          Limit — kitne APKs scrape karni hain (blank = all)
+        </label>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            id="apk-limit"
+            type="number"
+            min={1}
+            step={1}
+            value={limit}
+            onChange={(e) => setLimit(e.target.value)}
+            disabled={busy}
+            className="w-36 rounded-lg border border-slate-300 bg-white px-3.5 py-3 text-[14px] outline-none focus:border-[#2f7bff]"
+            placeholder="100"
+          />
+          {[50, 100, 250, 500].map((n) => (
+            <button
+              key={n}
+              type="button"
+              disabled={busy}
+              onClick={() => setLimit(String(n))}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {n}
+            </button>
+          ))}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setLimit("")}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            All
+          </button>
+        </div>
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             type="button"
@@ -173,7 +230,7 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
             disabled={busy}
             className="rounded-lg bg-[#2f7bff] px-4 py-2.5 text-[13px] font-bold text-white hover:bg-[#2563eb] disabled:opacity-50"
           >
-            Scrape All APK Details
+            Scrape APK Details
           </button>
           {active ? (
             <button
