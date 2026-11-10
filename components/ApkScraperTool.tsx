@@ -143,14 +143,22 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
         for (const u of urls) {
           try {
             const parsed = new URL(u);
+            const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
             const path = parsed.pathname.replace(/\/+$/, "") || "/";
-            if (path === "/") {
+            const okHost =
+              host === "androidapks.com" || host.endsWith(".androidapks.com");
+            if (!okHost) {
+              throw new Error(`Sirf androidapks.com URLs allowed: ${u}`);
+            }
+            if (host === "androidapks.com" && path === "/") {
               throw new Error(
-                `App page URL do, category home nahi. Example: https://androidapks.com/instagram/ — not ${u}`,
+                "Main homepage nahi — app URL do. Example: https://tekken-8.androidapks.com/",
               );
             }
           } catch (e) {
-            if (e instanceof Error && e.message.includes("App page")) throw e;
+            if (e instanceof Error && /androidapks|homepage|Invalid URL/i.test(e.message)) {
+              throw e;
+            }
             throw new Error(`Invalid URL: ${u}`);
           }
         }
@@ -358,15 +366,15 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
               disabled={busy}
               className="mt-2 w-full rounded-lg border border-amber-400/80 bg-white px-3.5 py-3 font-mono text-[13px] outline-none focus:border-[#2f7bff]"
               placeholder={
-                "https://androidapks.com/instagram/\nhttps://androidapks.com/whatsapp/"
+                "https://tekken-8.androidapks.com/\nhttps://instagram.androidapks.com/"
               }
             />
             <p className="mt-2 text-[12px] text-slate-500">
-              Specific app page URL do (path ke sath). Example:{" "}
-              <span className="font-mono text-slate-700">https://androidapks.com/instagram/</span> —
-              category home jaise{" "}
-              <span className="font-mono text-slate-700">https://instagram.androidapks.com/</span>{" "}
-              kaam nahi karega. Max 500 URLs.
+              App page URL paste karo — subdomain style bhi chalega, jaise{" "}
+              <span className="font-mono text-slate-700">https://tekken-8.androidapks.com/</span>.
+              Sirf main site home{" "}
+              <span className="font-mono text-slate-700">https://androidapks.com/</span> mat do. Max
+              500 URLs.
             </p>
           </>
         )}
