@@ -87,22 +87,40 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
     return data;
   }
 
+  function clearSavedJob() {
+    window.localStorage.removeItem("androidapks-job-id");
+    setJobId("");
+    setJob(null);
+    setBusy(false);
+  }
+
+  function applyJobStatus(data: JobStatus) {
+    setJob(data);
+    const active = data.status === "discovering" || data.status === "running";
+    setBusy(active);
+    const modeNote = data.mode === "custom" ? " · custom URL" : "";
+    const limitNote = data.limit ? ` · limit ${data.limit}` : "";
+    setStatus(
+      `${data.status.replaceAll("_", " ")}${modeNote}${limitNote} · ${data.total} queued · ${data.processed} processed · ${data.success} apps scraped · ${data.skipped || 0} skipped · ${data.errors.length} errors`,
+    );
+    return active;
+  }
+
   async function poll(id: string) {
     try {
       const data = (await api(`/api/scrape/apk/status?id=${encodeURIComponent(id)}`)) as JobStatus;
-      setJob(data);
-      const active = data.status === "discovering" || data.status === "running";
-      setBusy(active);
-      const modeNote = data.mode === "custom" ? " · custom URL" : "";
-      const limitNote = data.limit ? ` · limit ${data.limit}` : "";
-      setStatus(
-        `${data.status.replaceAll("_", " ")}${modeNote}${limitNote} · ${data.total} queued · ${data.processed} processed · ${data.success} apps scraped · ${data.skipped || 0} skipped · ${data.errors.length} errors`,
-      );
+      const active = applyJobStatus(data);
       if (active) {
         timer.current = window.setTimeout(() => void poll(id), 2000);
       }
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Status failed");
+      const msg = err instanceof Error ? err.message : "Status failed";
+      if (/job not found|invalid job/i.test(msg)) {
+        clearSavedJob();
+        setStatus("Purana scrape job expire ho gaya. Dubara Scrape dabao.");
+        return;
+      }
+      setStatus(msg);
       timer.current = window.setTimeout(() => void poll(id), 5000);
     }
   }
@@ -110,6 +128,7 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
   async function start() {
     if (timer.current) window.clearTimeout(timer.current);
     setBusy(true);
+    setStatus(mode === "custom" ? "Custom URL scrape chal raha hai…" : "Catalog scrape start…");
     try {
       let body: Record<string, unknown>;
 
@@ -120,6 +139,20 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
           .filter(Boolean);
         if (!urls.length) {
           throw new Error("Kam az kam ek androidapks.com app page URL likho.");
+        }
+        for (const u of urls) {
+          try {
+            const parsed = new URL(u);
+            const path = parsed.pathname.replace(/\/+$/, "") || "/";
+            if (path === "/") {
+              throw new Error(
+                `App page URL do, category home nahi. Example: https://androidapks.com/instagram/ — not ${u}`,
+              );
+            }
+          } catch (e) {
+            if (e instanceof Error && e.message.includes("App page")) throw e;
+            throw new Error(`Invalid URL: ${u}`);
+          }
         }
         body = {
           mode: "custom",
@@ -142,9 +175,27 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
       const data = (await api("/api/scrape/apk/start", {
         method: "POST",
         body: JSON.stringify(body),
-      })) as { id: string };
+      })) as JobStatus & { id: string };
       setJobId(data.id);
       window.localStorage.setItem("androidapks-job-id", data.id);
+      if (data.status && data.status !== "discovering" && data.status !== "running") {
+        applyJobStatus({
+          id: data.id,
+          website: data.website || "",
+          status: data.status,
+          total: data.total ?? 0,
+          processed: data.processed ?? 0,
+          current: data.current || "",
+          cancel: false,
+          skipped: data.skipped ?? 0,
+          success: data.success ?? 0,
+          limit: data.limit,
+          mode: data.mode,
+          errors: data.errors || [],
+          message: data.message,
+        });
+        return;
+      }
       void poll(data.id);
     } catch (err) {
       setBusy(false);
@@ -307,11 +358,15 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
               disabled={busy}
               className="mt-2 w-full rounded-lg border border-amber-400/80 bg-white px-3.5 py-3 font-mono text-[13px] outline-none focus:border-[#2f7bff]"
               placeholder={
-                "https://androidapks.com/some-app/\nhttps://androidapks.com/another-app/"
+                "https://androidapks.com/instagram/\nhttps://androidapks.com/whatsapp/"
               }
             />
             <p className="mt-2 text-[12px] text-slate-500">
-              App details page URL do — download/APK file link nahi. Max 500 URLs.
+              Specific app page URL do (path ke sath). Example:{" "}
+              <span className="font-mono text-slate-700">https://androidapks.com/instagram/</span> —
+              category home jaise{" "}
+              <span className="font-mono text-slate-700">https://instagram.androidapks.com/</span>{" "}
+              kaam nahi karega. Max 500 URLs.
             </p>
           </>
         )}
