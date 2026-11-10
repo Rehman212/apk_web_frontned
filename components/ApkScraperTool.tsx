@@ -22,15 +22,24 @@ type JobStatus = {
   skipped: number;
   success: number;
   limit?: number | null;
+  mode?: "catalog" | "custom";
   errors: { url: string; error: string }[];
   message?: string;
 };
 
+type ScrapeMode = "catalog" | "custom";
+
+const LIMIT_PRESETS = [100, 200, 500, 1000, 2500] as const;
+
 export function ApkScraperTool({ onBack }: { onBack: () => void }) {
+  const [mode, setMode] = useState<ScrapeMode>("catalog");
   const [url, setUrl] = useState("https://androidapks.com/");
+  const [customUrls, setCustomUrls] = useState("");
   const [limit, setLimit] = useState("100");
   const [jobId, setJobId] = useState("");
-  const [status, setStatus] = useState("AndroidAPKs ke app sitemaps se overall details scrape karein.");
+  const [status, setStatus] = useState(
+    "Catalog scrape (limit) ya specific app URL(s) se scrape karein.",
+  );
   const [job, setJob] = useState<JobStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const timer = useRef<number | null>(null);
@@ -84,9 +93,10 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
       setJob(data);
       const active = data.status === "discovering" || data.status === "running";
       setBusy(active);
+      const modeNote = data.mode === "custom" ? " · custom URL" : "";
       const limitNote = data.limit ? ` · limit ${data.limit}` : "";
       setStatus(
-        `${data.status.replaceAll("_", " ")}${limitNote} · ${data.total} queued · ${data.processed} processed · ${data.success} apps scraped · ${data.skipped || 0} skipped · ${data.errors.length} errors`,
+        `${data.status.replaceAll("_", " ")}${modeNote}${limitNote} · ${data.total} queued · ${data.processed} processed · ${data.success} apps scraped · ${data.skipped || 0} skipped · ${data.errors.length} errors`,
       );
       if (active) {
         timer.current = window.setTimeout(() => void poll(id), 2000);
@@ -101,17 +111,37 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
     if (timer.current) window.clearTimeout(timer.current);
     setBusy(true);
     try {
-      const trimmed = limit.trim();
-      const parsed = trimmed === "" ? undefined : Number(trimmed);
-      if (parsed !== undefined && (!Number.isFinite(parsed) || parsed < 1)) {
-        throw new Error("Limit 1 ya us se zyada number likho, ya blank chhor do for all.");
+      let body: Record<string, unknown>;
+
+      if (mode === "custom") {
+        const urls = customUrls
+          .split(/[\n,]+/)
+          .map((u) => u.trim())
+          .filter(Boolean);
+        if (!urls.length) {
+          throw new Error("Kam az kam ek androidapks.com app page URL likho.");
+        }
+        body = {
+          mode: "custom",
+          url: urls[0],
+          urls,
+        };
+      } else {
+        const trimmed = limit.trim();
+        const parsed = trimmed === "" ? undefined : Number(trimmed);
+        if (parsed !== undefined && (!Number.isFinite(parsed) || parsed < 1)) {
+          throw new Error("Limit 1 ya us se zyada number likho, ya blank chhor do for all.");
+        }
+        body = {
+          mode: "catalog",
+          url: url.trim() || "https://androidapks.com/",
+          limit: parsed,
+        };
       }
+
       const data = (await api("/api/scrape/apk/start", {
         method: "POST",
-        body: JSON.stringify({
-          url: url.trim(),
-          limit: parsed,
-        }),
+        body: JSON.stringify(body),
       })) as { id: string };
       setJobId(data.id);
       window.localStorage.setItem("androidapks-job-id", data.id);
@@ -163,7 +193,9 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
       <div className="flex items-center justify-between gap-2">
         <div>
           <h1 className="text-[15px] font-semibold text-white">Get APK Scraper</h1>
-          <p className="text-[12px] text-slate-500">AndroidAPKs overall catalog scrape</p>
+          <p className="text-[12px] text-slate-500">
+            Catalog limit ya specific app URL scrape
+          </p>
         </div>
         <button
           type="button"
@@ -176,53 +208,114 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
 
       <section className="rounded-xl border border-white/[0.08] bg-white p-5 text-slate-900 shadow-sm">
         <h2 className="text-[18px] font-bold text-[#0f172a]">5. AndroidAPKs — Overall APK Scrape</h2>
-        <label htmlFor="apk-website" className="mt-4 block text-[13px] font-medium text-slate-700">
-          Website URL — sirf androidapks.com
-        </label>
-        <input
-          id="apk-website"
-          type="url"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          disabled={busy}
-          className="mt-2 w-full rounded-lg border border-amber-400/80 bg-white px-3.5 py-3 text-[14px] outline-none ring-0 focus:border-[#2f7bff]"
-          placeholder="https://androidapks.com/"
-        />
-        <label htmlFor="apk-limit" className="mt-4 block text-[13px] font-medium text-slate-700">
-          Limit — kitne APKs scrape karni hain (blank = all)
-        </label>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <input
-            id="apk-limit"
-            type="number"
-            min={1}
-            step={1}
-            value={limit}
-            onChange={(e) => setLimit(e.target.value)}
-            disabled={busy}
-            className="w-36 rounded-lg border border-slate-300 bg-white px-3.5 py-3 text-[14px] outline-none focus:border-[#2f7bff]"
-            placeholder="100"
-          />
-          {[50, 100, 250, 500].map((n) => (
-            <button
-              key={n}
-              type="button"
-              disabled={busy}
-              onClick={() => setLimit(String(n))}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {n}
-            </button>
-          ))}
+
+        <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
             disabled={busy}
-            onClick={() => setLimit("")}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            onClick={() => setMode("catalog")}
+            className={`rounded-lg px-3.5 py-2 text-[13px] font-semibold disabled:opacity-50 ${
+              mode === "catalog"
+                ? "bg-[#2f7bff] text-white"
+                : "border border-slate-200 text-slate-700 hover:bg-slate-50"
+            }`}
           >
-            All
+            Catalog (limit)
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setMode("custom")}
+            className={`rounded-lg px-3.5 py-2 text-[13px] font-semibold disabled:opacity-50 ${
+              mode === "custom"
+                ? "bg-[#2f7bff] text-white"
+                : "border border-slate-200 text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            Custom URL
           </button>
         </div>
+
+        {mode === "catalog" ? (
+          <>
+            <label htmlFor="apk-website" className="mt-4 block text-[13px] font-medium text-slate-700">
+              Website URL — sirf androidapks.com
+            </label>
+            <input
+              id="apk-website"
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              disabled={busy}
+              className="mt-2 w-full rounded-lg border border-amber-400/80 bg-white px-3.5 py-3 text-[14px] outline-none ring-0 focus:border-[#2f7bff]"
+              placeholder="https://androidapks.com/"
+            />
+            <label htmlFor="apk-limit" className="mt-4 block text-[13px] font-medium text-slate-700">
+              Limit — kitne APKs scrape karni hain (blank = all)
+            </label>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <input
+                id="apk-limit"
+                type="number"
+                min={1}
+                step={1}
+                value={limit}
+                onChange={(e) => setLimit(e.target.value)}
+                disabled={busy}
+                className="w-36 rounded-lg border border-slate-300 bg-white px-3.5 py-3 text-[14px] outline-none focus:border-[#2f7bff]"
+                placeholder="100"
+              />
+              {LIMIT_PRESETS.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setLimit(String(n))}
+                  className={`rounded-lg border px-3 py-2 text-[12px] font-semibold disabled:opacity-50 ${
+                    limit === String(n)
+                      ? "border-[#2f7bff] bg-[#2f7bff]/10 text-[#1d4ed8]"
+                      : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setLimit("")}
+                className={`rounded-lg border px-3 py-2 text-[12px] font-semibold disabled:opacity-50 ${
+                  limit === ""
+                    ? "border-[#2f7bff] bg-[#2f7bff]/10 text-[#1d4ed8]"
+                    : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                All
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <label htmlFor="apk-custom-urls" className="mt-4 block text-[13px] font-medium text-slate-700">
+              Custom app URL(s) — ek line pe ek, ya comma se
+            </label>
+            <textarea
+              id="apk-custom-urls"
+              rows={5}
+              value={customUrls}
+              onChange={(e) => setCustomUrls(e.target.value)}
+              disabled={busy}
+              className="mt-2 w-full rounded-lg border border-amber-400/80 bg-white px-3.5 py-3 font-mono text-[13px] outline-none focus:border-[#2f7bff]"
+              placeholder={
+                "https://androidapks.com/some-app/\nhttps://androidapks.com/another-app/"
+              }
+            />
+            <p className="mt-2 text-[12px] text-slate-500">
+              App details page URL do — download/APK file link nahi. Max 500 URLs.
+            </p>
+          </>
+        )}
+
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             type="button"
@@ -230,7 +323,7 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
             disabled={busy}
             className="rounded-lg bg-[#2f7bff] px-4 py-2.5 text-[13px] font-bold text-white hover:bg-[#2563eb] disabled:opacity-50"
           >
-            Scrape APK Details
+            {mode === "custom" ? "Scrape Custom URL(s)" : "Scrape APK Details"}
           </button>
           {active ? (
             <button
@@ -285,8 +378,8 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
           </details>
         ) : null}
         <p className="mt-4 text-[12px] text-slate-500">
-          AndroidAPKs ke app sitemaps se overall details scrape karein. App details, versions, package
-          names, icons, screenshots aur download-page links. APK binaries download nahi hongi.
+          Catalog mode sitemap se limit ke mutabiq apps scrape karta hai. Custom mode sirf di hui
+          app page URL(s) scrape karta hai. APK binaries download nahi hongi.
         </p>
       </section>
     </div>
