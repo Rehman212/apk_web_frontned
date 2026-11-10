@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { RichTextEditor } from "@/components/RichTextEditor";
 import { apiBase } from "@/lib/apiBase";
 import { HOME_SECTIONS, sectionName } from "@/lib/homeSections";
 
@@ -405,7 +406,7 @@ export function DbToolsList({
 
       {editing && form ? (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 py-8">
-          <div className="w-full max-w-2xl rounded-xl border border-white/10 bg-[#121820] p-4 shadow-2xl sm:p-5">
+          <div className="w-full max-w-3xl rounded-xl border border-white/10 bg-[#121820] p-4 shadow-2xl sm:p-5">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-[14px] font-semibold text-white">Edit product</h2>
@@ -542,15 +543,16 @@ export function DbToolsList({
                   className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 text-[13px] text-slate-200 outline-none"
                 />
               </label>
-              <label className="block text-[11px] text-slate-400 sm:col-span-2">
-                Full description / content
-                <textarea
-                  rows={8}
+              <div className="sm:col-span-2">
+                <p className="text-[11px] text-slate-400">Full description / content</p>
+                <RichTextEditor
+                  key={editing.id}
                   value={form.description}
-                  onChange={(e) => setField("description", e.target.value)}
-                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 text-[13px] leading-5 text-slate-200 outline-none"
+                  disabled={saving || !!deletingId}
+                  onChange={(html) => setField("description", html)}
+                  placeholder="Headings, lists, links, images — product content yahan likho…"
                 />
-              </label>
+              </div>
             </div>
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
