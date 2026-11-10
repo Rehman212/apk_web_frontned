@@ -10,14 +10,14 @@ import {
   displayDownloads,
   displayRating,
   formatRating,
-  getApp,
   type StoreApp,
 } from "@/lib/catalog";
 import { hdMediaUrl } from "@/lib/media";
+import { resolveApp } from "@/lib/resolveApp";
 
 export async function generateMetadata({ params }: PageProps<"/app/[slug]">) {
   const { slug } = await params;
-  const app = getApp(slug);
+  const app = await resolveApp(slug);
   if (!app) return { title: "App" };
   return {
     title: `${app.name} APK Download`,
@@ -28,7 +28,7 @@ export async function generateMetadata({ params }: PageProps<"/app/[slug]">) {
 
 export default async function AppDetailPage({ params }: PageProps<"/app/[slug]">) {
   const { slug } = await params;
-  const app = getApp(slug);
+  const app = await resolveApp(slug);
   if (!app) notFound();
 
   const category = categories.find((item) => item.slug === app.category);

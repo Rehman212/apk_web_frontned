@@ -18,12 +18,53 @@ type DbApk = {
   size?: string;
   apkUrl?: string | null;
   iconUrl?: string | null;
+  short?: string;
+  description?: string;
+  requires?: string;
   letter?: string;
   accent?: string;
 };
 
+type EditForm = {
+  name: string;
+  slug: string;
+  packageName: string;
+  developer: string;
+  kind: string;
+  category: string;
+  homeSection: string;
+  version: string;
+  size: string;
+  apkUrl: string;
+  iconUrl: string;
+  short: string;
+  description: string;
+  requires: string;
+  accent: string;
+};
+
 function token() {
   return window.localStorage.getItem("modplays-token") || window.sessionStorage.getItem("modplays-token") || "";
+}
+
+function toForm(app: DbApk): EditForm {
+  return {
+    name: app.name || "",
+    slug: app.slug || "",
+    packageName: app.packageName || "",
+    developer: app.developer || "",
+    kind: app.kind || "app",
+    category: app.category || "tools",
+    homeSection: app.homeSection || "latest-updates",
+    version: app.version || "",
+    size: app.size || "",
+    apkUrl: app.apkUrl || "",
+    iconUrl: app.iconUrl || "",
+    short: app.short || "",
+    description: app.description || "",
+    requires: app.requires || "Android 8.0+",
+    accent: app.accent || "#2f7bff",
+  };
 }
 
 export function DbToolsList({
@@ -42,8 +83,9 @@ export function DbToolsList({
   const [q, setQ] = useState("");
   const [sectionFilter, setSectionFilter] = useState("all");
   const [editing, setEditing] = useState<DbApk | null>(null);
-  const [editSection, setEditSection] = useState("latest-updates");
+  const [form, setForm] = useState<EditForm | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -91,9 +133,30 @@ export function DbToolsList({
     });
   }, [apps, q, sectionFilter]);
 
+  function openEdit(app: DbApk) {
+    setError("");
+    setEditing(app);
+    setForm(toForm(app));
+  }
+
+  function closeEdit() {
+    if (saving || deletingId) return;
+    setEditing(null);
+    setForm(null);
+  }
+
+  function setField<K extends keyof EditForm>(key: K, value: EditForm[K]) {
+    setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
+  }
+
   async function saveEdit() {
-    if (!editing?.id) return;
+    if (!editing?.id || !form) return;
+    if (!form.name.trim() || !form.slug.trim() || !form.packageName.trim()) {
+      setError("Name, slug aur package name required hain.");
+      return;
+    }
     setSaving(true);
+    setError("");
     try {
       const res = await fetch(`${apiBase()}/api/apps/${editing.id}`, {
         method: "PATCH",
@@ -101,21 +164,89 @@ export function DbToolsList({
           "Content-Type": "application/json",
           Authorization: `Bearer ${token()}`,
         },
-        body: JSON.stringify({ homeSection: editSection }),
+        body: JSON.stringify({
+          name: form.name.trim(),
+          slug: form.slug.trim(),
+          packageName: form.packageName.trim(),
+          developer: form.developer.trim(),
+          kind: form.kind.trim(),
+          category: form.category.trim(),
+          homeSection: form.homeSection,
+          version: form.version.trim(),
+          size: form.size.trim(),
+          apkUrl: form.apkUrl.trim(),
+          iconUrl: form.iconUrl.trim(),
+          short: form.short,
+          description: form.description,
+          requires: form.requires.trim(),
+          accent: form.accent.trim(),
+        }),
       });
+      const data = (await res.json().catch(() => ({}))) as {
+        app?: DbApk;
+        message?: string | string[];
+      };
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { message?: string };
-        setError(data.message || "Failed to update category");
+        const msg = Array.isArray(data.message) ? data.message[0] : data.message;
+        setError(msg || "Failed to update product");
         return;
       }
-      setApps((list) =>
-        list.map((a) => (a.id === editing.id ? { ...a, homeSection: editSection } : a)),
-      );
+      const updated = data.app;
+      if (updated) {
+        setApps((list) => list.map((a) => (a.id === editing.id ? { ...a, ...updated } : a)));
+      } else {
+        setApps((list) =>
+          list.map((a) =>
+            a.id === editing.id
+              ? {
+                  ...a,
+                  ...form,
+                  apkUrl: form.apkUrl || null,
+                  iconUrl: form.iconUrl || null,
+                }
+              : a,
+          ),
+        );
+      }
       setEditing(null);
+      setForm(null);
     } catch {
-      setError("Cannot reach backend to save category.");
+      setError("Cannot reach backend to save product.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function deleteApp(app: DbApk, fromModal = false) {
+    if (!app.id) return;
+    const ok = window.confirm(`Delete "${app.name}"? Ye APK DB se permanently hat jayegi.`);
+    if (!ok) return;
+    setDeletingId(app.id);
+    setError("");
+    try {
+      const res = await fetch(`${apiBase()}/api/apps/${app.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        count?: number;
+        message?: string | string[];
+      };
+      if (!res.ok) {
+        const msg = Array.isArray(data.message) ? data.message[0] : data.message;
+        setError(msg || "Failed to delete product");
+        return;
+      }
+      setApps((list) => list.filter((a) => a.id !== app.id));
+      setCount((c) => (typeof data.count === "number" ? data.count : Math.max(0, c - 1)));
+      if (fromModal || editing?.id === app.id) {
+        setEditing(null);
+        setForm(null);
+      }
+    } catch {
+      setError("Cannot reach backend to delete product.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -125,7 +256,7 @@ export function DbToolsList({
         <div>
           <h1 className="text-[15px] font-semibold text-white">ALL Tools</h1>
           <p className="text-[12px] text-slate-500">
-            {loading ? "Loading…" : `${count} APKs in DB — edit to set homepage category`}
+            {loading ? "Loading…" : `${count} APKs in DB — edit content ya delete`}
           </p>
         </div>
         <div className="flex gap-1.5">
@@ -190,7 +321,7 @@ export function DbToolsList({
           />
         </div>
 
-        {error ? <p className="px-3.5 py-3 text-[12px] text-rose-300">{error}</p> : null}
+        {error && !editing ? <p className="px-3.5 py-3 text-[12px] text-rose-300">{error}</p> : null}
 
         {loading ? (
           <p className="px-3.5 py-8 text-center text-[12px] text-slate-500">Loading…</p>
@@ -198,14 +329,14 @@ export function DbToolsList({
           <p className="px-3.5 py-8 text-center text-[12px] text-slate-500">No tools found.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] text-left text-[12px]">
+            <table className="w-full min-w-[920px] text-left text-[12px]">
               <thead className="border-b border-white/[0.04] text-[10px] uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-3.5 py-2 font-medium">App</th>
                   <th className="px-3.5 py-2 font-medium">Package</th>
                   <th className="px-3.5 py-2 font-medium">Homepage category</th>
                   <th className="px-3.5 py-2 font-medium">Version</th>
-                  <th className="px-3.5 py-2 font-medium">Edit</th>
+                  <th className="px-3.5 py-2 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -240,20 +371,29 @@ export function DbToolsList({
                     </td>
                     <td className="px-3.5 py-2 font-mono text-[11px] text-slate-400">{app.version || "—"}</td>
                     <td className="px-3.5 py-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditing(app);
-                          setEditSection(app.homeSection || "latest-updates");
-                        }}
-                        className="text-[11px] font-medium text-[#7eb6ff] hover:underline"
-                      >
-                        Edit
-                      </button>
-                      {" · "}
-                      <Link href={`/app/${app.slug}`} className="text-[11px] font-medium text-slate-400 hover:underline">
-                        View
-                      </Link>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <button
+                          type="button"
+                          onClick={() => openEdit(app)}
+                          className="text-[11px] font-medium text-[#7eb6ff] hover:underline"
+                        >
+                          Edit product
+                        </button>
+                        <Link
+                          href={`/app/${app.slug}`}
+                          className="text-[11px] font-medium text-slate-400 hover:underline"
+                        >
+                          View
+                        </Link>
+                        <button
+                          type="button"
+                          disabled={deletingId === app.id}
+                          onClick={() => void deleteApp(app)}
+                          className="text-[11px] font-medium text-rose-400 hover:underline disabled:opacity-50"
+                        >
+                          {deletingId === app.id ? "Deleting…" : "Delete"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -263,42 +403,183 @@ export function DbToolsList({
         )}
       </section>
 
-      {editing ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-xl border border-white/10 bg-[#121820] p-4 shadow-2xl">
-            <h2 className="text-[14px] font-semibold text-white">Edit tool category</h2>
-            <p className="mt-1 text-[12px] text-slate-500">{editing.name}</p>
-            <label className="mt-4 block text-[11px] text-slate-400">Homepage category</label>
-            <select
-              value={editSection}
-              onChange={(e) => setEditSection(e.target.value)}
-              className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 text-[13px] text-slate-200 outline-none"
-            >
-              {HOME_SECTIONS.map((s) => (
-                <option key={s.slug} value={s.slug}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            <p className="mt-2 text-[11px] text-slate-600">
-              Ye category homepage pe us section mein show hogi (Latest Updates, Popular Games, …).
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
+      {editing && form ? (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 py-8">
+          <div className="w-full max-w-2xl rounded-xl border border-white/10 bg-[#121820] p-4 shadow-2xl sm:p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-[14px] font-semibold text-white">Edit product</h2>
+                <p className="mt-1 text-[12px] text-slate-500">{editing.name}</p>
+              </div>
               <button
                 type="button"
-                onClick={() => setEditing(null)}
-                className="rounded-md px-3 py-1.5 text-[12px] text-slate-400 hover:bg-white/[0.04]"
+                onClick={closeEdit}
+                className="rounded-md px-2 py-1 text-[12px] text-slate-400 hover:bg-white/[0.04]"
               >
-                Cancel
+                Close
               </button>
+            </div>
+
+            {error ? <p className="mt-3 text-[12px] text-rose-300">{error}</p> : null}
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="block text-[11px] text-slate-400 sm:col-span-2">
+                Name
+                <input
+                  value={form.name}
+                  onChange={(e) => setField("name", e.target.value)}
+                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 text-[13px] text-slate-200 outline-none"
+                />
+              </label>
+              <label className="block text-[11px] text-slate-400">
+                Slug
+                <input
+                  value={form.slug}
+                  onChange={(e) => setField("slug", e.target.value)}
+                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 font-mono text-[12px] text-slate-200 outline-none"
+                />
+              </label>
+              <label className="block text-[11px] text-slate-400">
+                Package name
+                <input
+                  value={form.packageName}
+                  onChange={(e) => setField("packageName", e.target.value)}
+                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 font-mono text-[12px] text-slate-200 outline-none"
+                />
+              </label>
+              <label className="block text-[11px] text-slate-400">
+                Developer
+                <input
+                  value={form.developer}
+                  onChange={(e) => setField("developer", e.target.value)}
+                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 text-[13px] text-slate-200 outline-none"
+                />
+              </label>
+              <label className="block text-[11px] text-slate-400">
+                Homepage category
+                <select
+                  value={form.homeSection}
+                  onChange={(e) => setField("homeSection", e.target.value)}
+                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 text-[13px] text-slate-200 outline-none"
+                >
+                  {HOME_SECTIONS.map((s) => (
+                    <option key={s.slug} value={s.slug}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-[11px] text-slate-400">
+                Kind
+                <input
+                  value={form.kind}
+                  onChange={(e) => setField("kind", e.target.value)}
+                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 text-[13px] text-slate-200 outline-none"
+                />
+              </label>
+              <label className="block text-[11px] text-slate-400">
+                Category
+                <input
+                  value={form.category}
+                  onChange={(e) => setField("category", e.target.value)}
+                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 text-[13px] text-slate-200 outline-none"
+                />
+              </label>
+              <label className="block text-[11px] text-slate-400">
+                Version
+                <input
+                  value={form.version}
+                  onChange={(e) => setField("version", e.target.value)}
+                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 text-[13px] text-slate-200 outline-none"
+                />
+              </label>
+              <label className="block text-[11px] text-slate-400">
+                Size
+                <input
+                  value={form.size}
+                  onChange={(e) => setField("size", e.target.value)}
+                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 text-[13px] text-slate-200 outline-none"
+                />
+              </label>
+              <label className="block text-[11px] text-slate-400">
+                Requires
+                <input
+                  value={form.requires}
+                  onChange={(e) => setField("requires", e.target.value)}
+                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 text-[13px] text-slate-200 outline-none"
+                />
+              </label>
+              <label className="block text-[11px] text-slate-400">
+                Accent
+                <input
+                  value={form.accent}
+                  onChange={(e) => setField("accent", e.target.value)}
+                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 font-mono text-[12px] text-slate-200 outline-none"
+                />
+              </label>
+              <label className="block text-[11px] text-slate-400 sm:col-span-2">
+                Icon URL
+                <input
+                  value={form.iconUrl}
+                  onChange={(e) => setField("iconUrl", e.target.value)}
+                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 font-mono text-[12px] text-slate-200 outline-none"
+                />
+              </label>
+              <label className="block text-[11px] text-slate-400 sm:col-span-2">
+                APK / download URL
+                <input
+                  value={form.apkUrl}
+                  onChange={(e) => setField("apkUrl", e.target.value)}
+                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 font-mono text-[12px] text-slate-200 outline-none"
+                />
+              </label>
+              <label className="block text-[11px] text-slate-400 sm:col-span-2">
+                Short description
+                <textarea
+                  rows={2}
+                  value={form.short}
+                  onChange={(e) => setField("short", e.target.value)}
+                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 text-[13px] text-slate-200 outline-none"
+                />
+              </label>
+              <label className="block text-[11px] text-slate-400 sm:col-span-2">
+                Full description / content
+                <textarea
+                  rows={8}
+                  value={form.description}
+                  onChange={(e) => setField("description", e.target.value)}
+                  className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0b0f14] px-2.5 py-2 text-[13px] leading-5 text-slate-200 outline-none"
+                />
+              </label>
+            </div>
+
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
               <button
                 type="button"
-                disabled={saving}
-                onClick={() => void saveEdit()}
-                className="rounded-md bg-[#2f7bff] px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-50"
+                disabled={saving || deletingId === editing.id}
+                onClick={() => void deleteApp(editing, true)}
+                className="rounded-md border border-rose-500/30 px-3 py-1.5 text-[12px] font-medium text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
               >
-                {saving ? "Saving…" : "Save"}
+                {deletingId === editing.id ? "Deleting…" : "Delete product"}
               </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={closeEdit}
+                  disabled={saving || !!deletingId}
+                  className="rounded-md px-3 py-1.5 text-[12px] text-slate-400 hover:bg-white/[0.04] disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={saving || !!deletingId}
+                  onClick={() => void saveEdit()}
+                  className="rounded-md bg-[#2f7bff] px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-50"
+                >
+                  {saving ? "Saving…" : "Save product"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
