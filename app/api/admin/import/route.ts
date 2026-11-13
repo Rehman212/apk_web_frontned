@@ -39,12 +39,17 @@ function toDbPayload(app: StoreApp) {
     size: app.size,
     apkUrl: app.apkUrl,
     iconUrl: app.iconUrl,
-    short: app.short,
-    description: app.description,
+    short: (app.short || "").slice(0, 300),
+    description: (app.description || "").slice(0, 20000),
     requires: app.requires,
     accent: app.accent,
     letter: app.letter,
-    payload: app as unknown as Record<string, unknown>,
+    payload: {
+      slug: app.slug,
+      screenshots: app.screenshots?.slice(0, 8) || [],
+      whatsNew: app.whatsNew,
+      versions: app.versions?.slice(0, 3) || [],
+    } as Record<string, unknown>,
   };
 }
 
@@ -106,8 +111,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ message: dbError }, { status: 502 });
   }
 
-  // Keep local JSON in sync for storefront catalog merge
-  const apps = await upsertImportedApp(app);
+  try {
+    await upsertImportedApp(app);
+  } catch {
+    /* Vercel filesystem is read-only — DB is source of truth */
+  }
   revalidatePath("/");
   revalidatePath("/apps");
   revalidatePath("/games");
@@ -116,7 +124,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     app,
-    count: dbCount ?? apps.length,
+    count: dbCount ?? 0,
     savedTo: "db",
   });
 }

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { apiBase } from "@/lib/apiBase";
+import { scrapedAppsToCsv, type ScrapedApp } from "@/lib/scrapeExport";
 
 function token() {
   return (
@@ -11,50 +12,35 @@ function token() {
   );
 }
 
-type JobStatus = {
-  id: string;
-  website: string;
-  status: string;
-  total: number;
-  processed: number;
-  current: string;
-  cancel: boolean;
-  skipped: number;
-  success: number;
-  limit?: number | null;
-  mode?: "catalog" | "custom";
-  errors: { url: string; error: string }[];
-  message?: string;
+type BatchResult = {
+  products?: ScrapedApp[];
+  remaining?: string[];
+  total?: number;
+  skipped?: number;
+  done?: boolean;
+  errors?: { url: string; error: string }[];
+  message?: string | string[];
 };
 
 type ScrapeMode = "catalog" | "custom";
 
-const LIMIT_PRESETS = [100, 200, 500, 1000, 2500] as const;
+const LIMIT_PRESETS = [50, 100, 200, 500, 1000] as const;
 
 export function ApkScraperTool({ onBack }: { onBack: () => void }) {
   const [mode, setMode] = useState<ScrapeMode>("catalog");
   const [url, setUrl] = useState("https://androidapks.com/");
   const [customUrls, setCustomUrls] = useState("");
   const [limit, setLimit] = useState("100");
-  const [jobId, setJobId] = useState("");
   const [status, setStatus] = useState(
-    "Catalog scrape (limit) ya specific app URL(s) se scrape karein.",
+    "Catalog scrape batches mein chalta hai — 100+ apps ke liye limit set karke Scrape dabao.",
   );
-  const [job, setJob] = useState<JobStatus | null>(null);
   const [busy, setBusy] = useState(false);
-  const timer = useRef<number | null>(null);
-
-  useEffect(() => {
-    const saved = window.localStorage.getItem("androidapks-job-id");
-    if (saved) {
-      setJobId(saved);
-      void poll(saved);
-    }
-    return () => {
-      if (timer.current) window.clearTimeout(timer.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const [processed, setProcessed] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [skipped, setSkipped] = useState(0);
+  const [products, setProducts] = useState<ScrapedApp[]>([]);
+  const [errors, setErrors] = useState<{ url: string; error: string }[]>([]);
+  const cancelRef = useRef(false);
 
   async function api(path: string, init?: RequestInit) {
     let res: Response;
@@ -76,176 +62,123 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
         ? (data as { message: string[] }).message[0]
         : (data as { message?: string }).message;
       if (res.status === 401) throw new Error("Session expired. Sign in again.");
-      if (res.status === 404) {
-        throw new Error(
-          msg ||
-            `Scrape API missing on ${apiBase()}. Restart Nest backend so /api/scrape routes load.`,
-        );
-      }
       throw new Error(msg || `Request failed (${res.status})`);
     }
     return data;
   }
 
-  function clearSavedJob() {
-    window.localStorage.removeItem("androidapks-job-id");
-    setJobId("");
-    setJob(null);
-    setBusy(false);
-  }
-
-  function applyJobStatus(data: JobStatus) {
-    setJob(data);
-    const active = data.status === "discovering" || data.status === "running";
-    setBusy(active);
-    const modeNote = data.mode === "custom" ? " · custom URL" : "";
-    const limitNote = data.limit ? ` · limit ${data.limit}` : "";
-    setStatus(
-      `${data.status.replaceAll("_", " ")}${modeNote}${limitNote} · ${data.total} queued · ${data.processed} processed · ${data.success} apps scraped · ${data.skipped || 0} skipped · ${data.errors.length} errors`,
-    );
-    return active;
-  }
-
-  async function poll(id: string) {
-    try {
-      const data = (await api(`/api/scrape/apk/status?id=${encodeURIComponent(id)}`)) as JobStatus;
-      const active = applyJobStatus(data);
-      if (active) {
-        timer.current = window.setTimeout(() => void poll(id), 2000);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Status failed";
-      if (/job not found|invalid job/i.test(msg)) {
-        clearSavedJob();
-        setStatus("Purana scrape job expire ho gaya. Dubara Scrape dabao.");
-        return;
-      }
-      setStatus(msg);
-      timer.current = window.setTimeout(() => void poll(id), 5000);
-    }
-  }
-
   async function start() {
-    if (timer.current) window.clearTimeout(timer.current);
+    cancelRef.current = false;
     setBusy(true);
-    setStatus(mode === "custom" ? "Custom URL scrape chal raha hai…" : "Catalog scrape start…");
+    setProducts([]);
+    setErrors([]);
+    setProcessed(0);
+    setSkipped(0);
+    setTotal(0);
+
     try {
-      let body: Record<string, unknown>;
+      let queue: string[] | undefined;
+      let catalogLimit: number | undefined;
+      let website = url.trim() || "https://androidapks.com/";
 
       if (mode === "custom") {
         const urls = customUrls
           .split(/[\n,]+/)
           .map((u) => u.trim())
           .filter(Boolean);
-        if (!urls.length) {
-          throw new Error("Kam az kam ek androidapks.com app page URL likho.");
-        }
+        if (!urls.length) throw new Error("Kam az kam ek androidapks.com app page URL likho.");
         for (const u of urls) {
-          try {
-            const parsed = new URL(u);
-            const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
-            const path = parsed.pathname.replace(/\/+$/, "") || "/";
-            const okHost =
-              host === "androidapks.com" || host.endsWith(".androidapks.com");
-            if (!okHost) {
-              throw new Error(`Sirf androidapks.com URLs allowed: ${u}`);
-            }
-            if (host === "androidapks.com" && path === "/") {
-              throw new Error(
-                "Main homepage nahi — app URL do. Example: https://tekken-8.androidapks.com/",
-              );
-            }
-          } catch (e) {
-            if (e instanceof Error && /androidapks|homepage|Invalid URL/i.test(e.message)) {
-              throw e;
-            }
-            throw new Error(`Invalid URL: ${u}`);
+          const parsed = new URL(u);
+          const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+          if (!(host === "androidapks.com" || host.endsWith(".androidapks.com"))) {
+            throw new Error(`Sirf androidapks.com URLs allowed: ${u}`);
           }
         }
-        body = {
-          mode: "custom",
-          url: urls[0],
-          urls,
-        };
+        queue = urls;
+        website = urls[0];
+        setTotal(urls.length);
+        setStatus(`Custom scrape · ${urls.length} URLs`);
       } else {
         const trimmed = limit.trim();
-        const parsed = trimmed === "" ? undefined : Number(trimmed);
-        if (parsed !== undefined && (!Number.isFinite(parsed) || parsed < 1)) {
+        catalogLimit = trimmed === "" ? undefined : Number(trimmed);
+        if (catalogLimit !== undefined && (!Number.isFinite(catalogLimit) || catalogLimit < 1)) {
           throw new Error("Limit 1 ya us se zyada number likho, ya blank chhor do for all.");
         }
-        body = {
-          mode: "catalog",
-          url: url.trim() || "https://androidapks.com/",
-          limit: parsed,
-        };
+        setStatus(
+          catalogLimit
+            ? `Catalog discover + scrape · limit ${catalogLimit}`
+            : "Catalog discover + scrape · all (batches)",
+        );
       }
 
-      const data = (await api("/api/scrape/apk/start", {
-        method: "POST",
-        body: JSON.stringify(body),
-      })) as JobStatus & { id: string };
-      setJobId(data.id);
-      window.localStorage.setItem("androidapks-job-id", data.id);
-      if (data.status && data.status !== "discovering" && data.status !== "running") {
-        applyJobStatus({
-          id: data.id,
-          website: data.website || "",
-          status: data.status,
-          total: data.total ?? 0,
-          processed: data.processed ?? 0,
-          current: data.current || "",
-          cancel: false,
-          skipped: data.skipped ?? 0,
-          success: data.success ?? 0,
-          limit: data.limit,
-          mode: data.mode,
-          errors: data.errors || [],
-          message: data.message,
-        });
-        return;
+      const all: ScrapedApp[] = [];
+      const allErrors: { url: string; error: string }[] = [];
+      let skip = 0;
+      let seen = 0;
+      let queuedTotal = mode === "custom" ? queue?.length || 0 : 0;
+
+      while (!cancelRef.current) {
+        const data = (await api("/api/scrape/apk/batch", {
+          method: "POST",
+          body: JSON.stringify({
+            mode,
+            url: website,
+            limit: catalogLimit,
+            urls: queue,
+          }),
+        })) as BatchResult;
+
+        const batch = Array.isArray(data.products) ? data.products : [];
+        all.push(...batch);
+        skip += data.skipped || 0;
+        const thisRound =
+          (data.products?.length || 0) + (data.skipped || 0) + (data.errors?.length || 0);
+        seen += thisRound;
+        if (data.errors?.length) allErrors.push(...data.errors);
+        queue = data.remaining || [];
+        if (!queuedTotal) queuedTotal = data.total || seen + queue.length;
+
+        setProducts([...all]);
+        setErrors([...allErrors]);
+        setSkipped(skip);
+        setProcessed(seen);
+        setTotal(queuedTotal);
+        setStatus(
+          `${cancelRef.current ? "stopping" : queue.length ? "running" : "completed"} · ${all.length} apps scraped · ${seen} processed · ${skip} skipped · ${allErrors.length} errors · ${queue.length} remaining`,
+        );
+
+        if (data.done || !queue.length) break;
       }
-      void poll(data.id);
+
+      setBusy(false);
+      if (cancelRef.current) {
+        setStatus((s) => s.replace(/^running/, "cancelled"));
+      }
     } catch (err) {
       setBusy(false);
       setStatus(err instanceof Error ? err.message : "Start failed");
     }
   }
 
-  async function stop() {
-    if (!jobId) return;
-    try {
-      await api("/api/scrape/apk/cancel", {
-        method: "POST",
-        body: JSON.stringify({ id: jobId }),
-      });
-      setStatus("Stopping…");
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Stop failed");
-    }
+  function stop() {
+    cancelRef.current = true;
+    setStatus("Stopping after current batch…");
   }
 
-  async function download(format: "csv" | "json") {
-    if (!jobId) return;
-    try {
-      const res = await fetch(
-        `${apiBase()}/api/scrape/apk/download?id=${encodeURIComponent(jobId)}&format=${format}`,
-        { headers: { Authorization: `Bearer ${token()}` } },
-      );
-      if (!res.ok) throw new Error("Download failed");
-      const blob = await res.blob();
-      const href = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = href;
-      a.download = `androidapks_details.${format}`;
-      a.click();
-      URL.revokeObjectURL(href);
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Download failed");
-    }
+  function download(format: "csv" | "json") {
+    if (!products.length) return;
+    const body =
+      format === "csv" ? scrapedAppsToCsv(products) : JSON.stringify(products, null, 2);
+    const blob = new Blob([body], {
+      type: format === "csv" ? "text/csv;charset=utf-8" : "application/json",
+    });
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = `androidapks_details.${format}`;
+    a.click();
+    URL.revokeObjectURL(href);
   }
-
-  const active = job?.status === "discovering" || job?.status === "running";
-  const hasResults = (job?.success || 0) > 0;
 
   return (
     <div className="space-y-4">
@@ -253,7 +186,7 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
         <div>
           <h1 className="text-[15px] font-semibold text-white">Get APK Scraper</h1>
           <p className="text-[12px] text-slate-500">
-            Catalog limit ya specific app URL scrape
+            Batches mein scrape — 50/100/200+ chalega, CSV seedha import-ready
           </p>
         </div>
         <button
@@ -310,7 +243,7 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
               placeholder="https://androidapks.com/"
             />
             <label htmlFor="apk-limit" className="mt-4 block text-[13px] font-medium text-slate-700">
-              Limit — kitne APKs scrape karni hain (blank = all)
+              Limit — kitne APKs scrape karni hain (blank = all, batches mein)
             </label>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <input
@@ -365,16 +298,11 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
               onChange={(e) => setCustomUrls(e.target.value)}
               disabled={busy}
               className="mt-2 w-full rounded-lg border border-amber-400/80 bg-white px-3.5 py-3 font-mono text-[13px] outline-none focus:border-[#2f7bff]"
-              placeholder={
-                "https://tekken-8.androidapks.com/\nhttps://instagram.androidapks.com/"
-              }
+              placeholder={"https://tekken-8.androidapks.com/\nhttps://instagram.androidapks.com/"}
             />
             <p className="mt-2 text-[12px] text-slate-500">
-              App page URL paste karo — subdomain style bhi chalega, jaise{" "}
-              <span className="font-mono text-slate-700">https://tekken-8.androidapks.com/</span>.
-              Sirf main site home{" "}
-              <span className="font-mono text-slate-700">https://androidapks.com/</span> mat do. Max
-              500 URLs.
+              Subdomain app pages chalenge, jaise{" "}
+              <span className="font-mono text-slate-700">https://tekken-8.androidapks.com/</span>. Max 500 URLs.
             </p>
           </>
         )}
@@ -388,12 +316,11 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
           >
             {mode === "custom" ? "Scrape Custom URL(s)" : "Scrape APK Details"}
           </button>
-          {active ? (
+          {busy ? (
             <button
               type="button"
-              onClick={() => void stop()}
-              disabled={job?.cancel}
-              className="rounded-lg border border-slate-300 px-4 py-2.5 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              onClick={stop}
+              className="rounded-lg border border-slate-300 px-4 py-2.5 text-[13px] font-semibold text-slate-700 hover:bg-slate-50"
             >
               Stop APK scraping
             </button>
@@ -402,47 +329,44 @@ export function ApkScraperTool({ onBack }: { onBack: () => void }) {
         <p className="mt-3 text-[13px] leading-5 text-slate-600" role="status">
           {status}
         </p>
-        {job ? (
+        {total > 0 || processed > 0 ? (
           <progress
             className="mt-3 h-2 w-full overflow-hidden rounded bg-slate-100 [&::-webkit-progress-bar]:bg-slate-100 [&::-webkit-progress-value]:bg-[#2f7bff] [&::-moz-progress-bar]:bg-[#2f7bff]"
-            max={Math.max(job.total, 1)}
-            value={job.processed}
+            max={Math.max(total, processed, 1)}
+            value={processed}
           />
         ) : null}
-        {active && job?.current ? (
-          <p className="mt-2 break-all text-[12px] text-slate-500">{job.current}</p>
-        ) : null}
-        {hasResults ? (
+        {products.length ? (
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => void download("csv")}
+              onClick={() => download("csv")}
               className="rounded-lg border border-slate-300 px-3 py-2 text-[12px] font-semibold text-slate-800 hover:bg-slate-50"
             >
               Download APK CSV
             </button>
             <button
               type="button"
-              onClick={() => void download("json")}
+              onClick={() => download("json")}
               className="rounded-lg border border-slate-300 px-3 py-2 text-[12px] font-semibold text-slate-800 hover:bg-slate-50"
             >
               Download APK JSON
             </button>
           </div>
         ) : null}
-        {job?.errors?.length ? (
+        {errors.length ? (
           <details className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-[12px] text-red-800">
             <summary className="cursor-pointer font-semibold">
-              APK failed links / errors ({job.errors.length})
+              APK failed links / errors ({errors.length})
             </summary>
             <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap">
-              {job.errors.map((e) => `${e.url}\n${e.error}`).join("\n\n")}
+              {errors.map((e) => `${e.url}\n${e.error}`).join("\n\n")}
             </pre>
           </details>
         ) : null}
         <p className="mt-4 text-[12px] text-slate-500">
-          Catalog mode sitemap se limit ke mutabiq apps scrape karta hai. Custom mode sirf di hui
-          app page URL(s) scrape karta hai. APK binaries download nahi hongi.
+          Har request 5 apps scrape karti hai taake Vercel timeout na ho. CSV Upload CSV tool ke columns
+          se match karti hai. APK binaries download nahi hongi.
         </p>
       </section>
     </div>

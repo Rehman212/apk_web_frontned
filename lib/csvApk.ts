@@ -38,12 +38,15 @@ const HEADER_ALIASES: Record<string, keyof CsvApkDraft | "ignore"> = {
   category: "category",
   cat: "category",
   size: "size",
+  file_size: "size",
+  filesize: "size",
   apk: "apkUrl",
   apkurl: "apkUrl",
   apk_url: "apkUrl",
   download: "apkUrl",
   downloadurl: "apkUrl",
   download_url: "apkUrl",
+  download_page_links: "apkUrl",
   url: "apkUrl",
   icon: "iconUrl",
   iconurl: "iconUrl",
@@ -54,6 +57,8 @@ const HEADER_ALIASES: Record<string, keyof CsvApkDraft | "ignore"> = {
   desc: "description",
   requires: "requires",
   android: "requires",
+  minimum_android: "requires",
+  min_android: "requires",
   slug: "slug",
 };
 
@@ -118,6 +123,24 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
+function firstUrl(raw: string) {
+  const text = raw.trim();
+  if (!text) return "";
+  if (text.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (Array.isArray(parsed)) {
+        const hit = parsed.find((v) => typeof v === "string" && /^https?:\/\//i.test(v));
+        return typeof hit === "string" ? hit : "";
+      }
+    } catch {
+      /* plain url */
+    }
+  }
+  const m = text.match(/https?:\/\/[^\s,"'\]]+/i);
+  return m?.[0] || (/^https?:\/\//i.test(text) ? text : "");
+}
+
 function pickKind(raw: string): AppKind {
   const v = raw.trim().toLowerCase();
   if (v === "game" || v === "games" || v === "g") return "game";
@@ -137,6 +160,8 @@ export function parseApkCsv(text: string): { drafts: CsvApkDraft[]; error?: stri
   }
 
   const drafts: CsvApkDraft[] = [];
+  const usedSlugs = new Set<string>();
+  const usedPkgs = new Set<string>();
   for (let i = 1; i < rows.length; i++) {
     const values = rows[i];
     const draft: CsvApkDraft = {
@@ -160,17 +185,32 @@ export function parseApkCsv(text: string): { drafts: CsvApkDraft[]; error?: stri
       if (!key || key === "ignore") return;
       const raw = (values[idx] ?? "").trim();
       if (!raw) return;
-      if (key === "kind") draft.kind = pickKind(raw);
+      if (key === "kind") {
+        draft.kind = pickKind(raw);
+        return;
+      }
+      if (key === "apkUrl") {
+        const fromList = firstUrl(raw);
+        if (fromList) draft.apkUrl = fromList;
+        return;
+      }
+      if (key === "description") draft.description = raw.slice(0, 20000);
       else draft[key] = raw as never;
     });
 
     if (!draft.name && draft.packageName) draft.name = draft.packageName;
     if (!draft.packageName && draft.name) {
-      draft.packageName = `com.imported.${slugify(draft.name).replace(/-/g, "") || "app"}`;
+      draft.packageName = `com.imported.${slugify(draft.name).replace(/-/g, "") || "app"}${i}`;
+    } else if (!draft.packageName) {
+      draft.packageName = `com.imported.row${i}`;
     }
     if (!draft.slug) {
       draft.slug = slugify(draft.packageName || draft.name) || `import-${i}`;
     }
+    if (usedSlugs.has(draft.slug)) draft.slug = `${draft.slug}-${i}`;
+    usedSlugs.add(draft.slug);
+    if (usedPkgs.has(draft.packageName)) draft.packageName = `${draft.packageName}.${i}`;
+    usedPkgs.add(draft.packageName);
     if (!draft.short) draft.short = draft.description.slice(0, 120) || `${draft.name} APK`;
     if (!draft.description) draft.description = draft.short;
     if (!draft.name) continue;
