@@ -9,6 +9,9 @@ function token() {
 
 type RowState = "pending" | "adding" | "added" | "error";
 
+const CHUNK = 40;
+const PAGE = 25;
+
 export function CsvImportTool({ onBack }: { onBack: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
@@ -18,6 +21,8 @@ export function CsvImportTool({ onBack }: { onBack: () => void }) {
   const [parseError, setParseError] = useState("");
   const [savedCount, setSavedCount] = useState(0);
   const [busyAll, setBusyAll] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     async function loadSaved() {
@@ -39,8 +44,10 @@ export function CsvImportTool({ onBack }: { onBack: () => void }) {
     if (!file) return;
     setFileName(file.name);
     setParseError("");
+    setProgress("");
     setStatus({});
     setMessages({});
+    setPage(0);
     const text = await file.text();
     const result = parseApkCsv(text);
     if (result.error) {
@@ -73,7 +80,7 @@ export function CsvImportTool({ onBack }: { onBack: () => void }) {
         return false;
       }
       setStatus((s) => ({ ...s, [draft.row]: "added" }));
-      setSavedCount(data.count ?? savedCount + 1);
+      setSavedCount(data.count ?? 0);
       return true;
     } catch {
       setStatus((s) => ({ ...s, [draft.row]: "error" }));
@@ -83,33 +90,76 @@ export function CsvImportTool({ onBack }: { onBack: () => void }) {
   }
 
   async function addAllPending() {
+    const pendingDrafts = drafts.filter((d) => status[d.row] !== "added");
+    if (!pendingDrafts.length) return;
     setBusyAll(true);
-    for (const draft of drafts) {
-      if (status[draft.row] === "added") continue;
-      await addOne(draft);
+    setProgress(`Saving 0 / ${pendingDrafts.length}…`);
+    let done = 0;
+    for (let i = 0; i < pendingDrafts.length; i += CHUNK) {
+      const chunk = pendingDrafts.slice(i, i + CHUNK);
+      for (const draft of chunk) {
+        setStatus((s) => ({ ...s, [draft.row]: "adding" }));
+      }
+      try {
+        const res = await fetch("/api/admin/import", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token()}`,
+          },
+          body: JSON.stringify({ apps: chunk.map(draftToStoreApp) }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          saved?: number;
+          failed?: number;
+          count?: number;
+          message?: string;
+        };
+        if (!res.ok) {
+          for (const draft of chunk) {
+            setStatus((s) => ({ ...s, [draft.row]: "error" }));
+            setMessages((m) => ({ ...m, [draft.row]: data.message || "Bulk save failed" }));
+          }
+        } else {
+          for (const draft of chunk) {
+            setStatus((s) => ({ ...s, [draft.row]: "added" }));
+          }
+          if (typeof data.count === "number") setSavedCount(data.count);
+          done += data.saved ?? chunk.length;
+        }
+      } catch {
+        for (const draft of chunk) {
+          setStatus((s) => ({ ...s, [draft.row]: "error" }));
+          setMessages((m) => ({ ...m, [draft.row]: "Network error" }));
+        }
+      }
+      setProgress(`Saving ${Math.min(i + chunk.length, pendingDrafts.length)} / ${pendingDrafts.length}…`);
     }
+    setProgress(`Done. ${done} saved to DB.`);
     setBusyAll(false);
   }
 
   function downloadTemplate() {
     const blob = new Blob([CSV_TEMPLATE], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
+    const href = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
+    a.href = href;
     a.download = "apk-import-template.csv";
     a.click();
-    URL.revokeObjectURL(url);
+    URL.revokeObjectURL(href);
   }
 
   const pending = drafts.filter((d) => status[d.row] !== "added").length;
   const added = drafts.filter((d) => status[d.row] === "added").length;
+  const pages = Math.max(1, Math.ceil(drafts.length / PAGE));
+  const slice = drafts.slice(page * PAGE, page * PAGE + PAGE);
 
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-[15px] font-semibold text-white">Upload CSV</h1>
-          <p className="text-[12px] text-slate-500">Har APK alag card — one-by-one add</p>
+          <p className="text-[12px] text-slate-500">Bulk import to DB — 40 rows per request</p>
         </div>
         <button
           type="button"
@@ -144,7 +194,7 @@ export function CsvImportTool({ onBack }: { onBack: () => void }) {
             onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
           />
           <div className="ml-auto flex flex-wrap gap-1.5 text-[11px] text-slate-500">
-            <span>{savedCount} saved</span>
+            <span>{savedCount} in DB</span>
             {fileName ? <span className="text-[#9ec5ff]">{fileName}</span> : null}
           </div>
         </div>
@@ -156,6 +206,7 @@ export function CsvImportTool({ onBack }: { onBack: () => void }) {
             {parseError}
           </p>
         ) : null}
+        {progress ? <p className="mt-2 text-[12px] text-[#9ec5ff]">{progress}</p> : null}
       </section>
 
       {drafts.length ? (
@@ -168,14 +219,14 @@ export function CsvImportTool({ onBack }: { onBack: () => void }) {
               type="button"
               disabled={busyAll || pending === 0}
               onClick={() => void addAllPending()}
-              className="rounded-md bg-white/[0.08] px-2.5 py-1.5 text-[12px] font-medium text-white disabled:opacity-40"
+              className="rounded-md bg-[#2f7bff] px-2.5 py-1.5 text-[12px] font-medium text-white disabled:opacity-40"
             >
-              {busyAll ? "Adding…" : "Add all pending"}
+              {busyAll ? "Saving to DB…" : `Add all pending (${pending})`}
             </button>
           </div>
 
           <div className="space-y-2">
-            {drafts.map((draft) => {
+            {slice.map((draft) => {
               const state = status[draft.row] ?? "pending";
               return (
                 <article key={draft.row} className="rounded-lg border border-white/[0.06] bg-[#121820] p-3">
@@ -197,11 +248,13 @@ export function CsvImportTool({ onBack }: { onBack: () => void }) {
                         <Meta label="APK URL" value={draft.apkUrl || "—"} wide />
                         <Meta label="Short" value={draft.short || "—"} wide />
                       </div>
-                      {messages[draft.row] ? <p className="mt-1 text-[11px] text-rose-300">{messages[draft.row]}</p> : null}
+                      {messages[draft.row] ? (
+                        <p className="mt-1 text-[11px] text-rose-300">{messages[draft.row]}</p>
+                      ) : null}
                     </div>
                     <button
                       type="button"
-                      disabled={state === "adding" || state === "added"}
+                      disabled={state === "adding" || state === "added" || busyAll}
                       onClick={() => void addOne(draft)}
                       className={`shrink-0 rounded-md px-2.5 py-1.5 text-[12px] font-medium ${
                         state === "added"
@@ -216,11 +269,37 @@ export function CsvImportTool({ onBack }: { onBack: () => void }) {
               );
             })}
           </div>
+
+          {pages > 1 ? (
+            <div className="flex items-center justify-between text-[12px] text-slate-500">
+              <span>
+                Page {page + 1} / {pages}
+              </span>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  disabled={page === 0}
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  className="rounded-md border border-white/[0.08] px-2 py-1 disabled:opacity-40"
+                >
+                  Prev
+                </button>
+                <button
+                  type="button"
+                  disabled={page >= pages - 1}
+                  onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}
+                  className="rounded-md border border-white/[0.08] px-2 py-1 disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          ) : null}
         </>
       ) : (
         <section className="rounded-lg border border-dashed border-white/[0.08] px-4 py-10 text-center">
           <p className="text-[13px] font-medium text-slate-300">No CSV loaded</p>
-          <p className="mt-1 text-[12px] text-slate-600">Upload CSV, then add each APK separately.</p>
+          <p className="mt-1 text-[12px] text-slate-600">Upload CSV, then Add all pending to save into DB.</p>
         </section>
       )}
     </>

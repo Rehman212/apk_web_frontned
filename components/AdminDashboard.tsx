@@ -75,6 +75,9 @@ export function AdminDashboard({ catalog }: { catalog: CatalogSnapshot }) {
   const [mobileNav, setMobileNav] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(true);
   const [now] = useState(() => new Date());
+  const [liveCount, setLiveCount] = useState<number | null>(null);
+  const [liveApps, setLiveApps] = useState<number | null>(null);
+  const [liveGames, setLiveGames] = useState<number | null>(null);
 
   const toolsActive =
     section === "tools-all" ||
@@ -98,6 +101,17 @@ export function AdminDashboard({ catalog }: { catalog: CatalogSnapshot }) {
           return;
         }
         setUser((await meRes.json()) as AdminUser);
+        const statsRes = await fetch(`${api}/api/apps/stats`, { headers });
+        if (statsRes.ok) {
+          const stats = (await statsRes.json()) as {
+            count?: number;
+            applications?: number;
+            games?: number;
+          };
+          if (typeof stats.count === "number") setLiveCount(stats.count);
+          if (typeof stats.applications === "number") setLiveApps(stats.applications);
+          if (typeof stats.games === "number") setLiveGames(stats.games);
+        }
       } catch {
         setError("Cannot reach the API. Start the Nest backend on port 4000.");
       }
@@ -116,7 +130,10 @@ export function AdminDashboard({ catalog }: { catalog: CatalogSnapshot }) {
 
   const maxBar = Math.max(...catalog.weekBars.map((b) => b.value), 1);
   const maxCat = Math.max(...catalog.byCategory.map((c) => c.count), 1);
-  const gameShare = Math.round((catalog.games / Math.max(catalog.catalog, 1)) * 100);
+  const totalPackages = liveCount ?? catalog.catalog;
+  const totalApps = liveApps ?? catalog.applications;
+  const totalGames = liveGames ?? catalog.games;
+  const gameShare = Math.round((totalGames / Math.max(totalPackages, 1)) * 100);
   const appShare = 100 - gameShare;
 
   if (!user && !error) {
@@ -128,14 +145,14 @@ export function AdminDashboard({ catalog }: { catalog: CatalogSnapshot }) {
   }
 
   const kpis = [
-    { label: "Total catalog", value: catalog.catalog.toLocaleString(), meta: "Live packages" },
-    { label: "Applications", value: catalog.applications.toLocaleString(), meta: `${appShare}% of catalog` },
-    { label: "Games", value: catalog.games.toLocaleString(), meta: `${gameShare}% of catalog` },
+    { label: "Total catalog", value: totalPackages.toLocaleString(), meta: liveCount != null ? "From database" : "Bundled catalog" },
+    { label: "Applications", value: totalApps.toLocaleString(), meta: `${appShare}% of catalog` },
+    { label: "Games", value: totalGames.toLocaleString(), meta: `${gameShare}% of catalog` },
     { label: "APK coverage", value: `${catalog.apkCoverage}%`, meta: `${catalog.withApk.toLocaleString()} ready` },
   ];
 
   const activity = [
-    { title: "Catalog synced", detail: `${catalog.catalog.toLocaleString()} titles`, time: "Now" },
+    { title: "Catalog synced", detail: `${totalPackages.toLocaleString()} titles`, time: "Now" },
     { title: "Admin signed in", detail: user?.email ?? "—", time: "Today" },
     { title: "Signup locked", detail: "Admin-only access", time: "Policy" },
     { title: "Media coverage", detail: `${catalog.iconCoverage}% icons`, time: "Live" },
@@ -164,7 +181,7 @@ export function AdminDashboard({ catalog }: { catalog: CatalogSnapshot }) {
                   Online
                 </span>
               </div>
-              <p className="mt-1 text-[12px] text-slate-300">{catalog.catalog.toLocaleString()} packages</p>
+              <p className="mt-1 text-[12px] text-slate-300">{totalPackages.toLocaleString()} packages</p>
             </div>
           </div>
 

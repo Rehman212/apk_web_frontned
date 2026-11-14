@@ -78,7 +78,53 @@ export async function POST(req: Request) {
   const admin = await requireAdmin(req);
   if (!admin) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
-  const body = (await req.json().catch(() => null)) as { app?: StoreApp } | null;
+  const body = (await req.json().catch(() => null)) as {
+    app?: StoreApp;
+    apps?: StoreApp[];
+  } | null;
+
+  if (Array.isArray(body?.apps) && body.apps.length) {
+    const items = body.apps
+      .filter((app) => app?.name && app?.slug && app?.packageName)
+      .map(toDbPayload)
+      .slice(0, 80);
+    if (!items.length) {
+      return NextResponse.json({ message: "No valid APK rows." }, { status: 400 });
+    }
+    try {
+      const res = await fetch(`${apiBase()}/api/apps/bulk`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${admin.token}`,
+        },
+        body: JSON.stringify({ apps: items }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        saved?: number;
+        failed?: number;
+        count?: number;
+        message?: string | string[];
+      };
+      if (!res.ok) {
+        const msg = Array.isArray(data.message) ? data.message[0] : data.message;
+        return NextResponse.json({ message: msg || "Bulk save failed" }, { status: 502 });
+      }
+      revalidatePath("/");
+      revalidatePath("/apps");
+      revalidatePath("/games");
+      return NextResponse.json({
+        ok: true,
+        saved: data.saved ?? items.length,
+        failed: data.failed ?? 0,
+        count: data.count ?? 0,
+        savedTo: "db",
+      });
+    } catch {
+      return NextResponse.json({ message: "Cannot reach backend DB API." }, { status: 502 });
+    }
+  }
+
   const app = body?.app;
   if (!app?.name || !app?.slug || !app?.packageName) {
     return NextResponse.json({ message: "Invalid APK payload." }, { status: 400 });
